@@ -22,7 +22,26 @@ def get_templates():
     global templates
     if templates is None:
         from fastapi.templating import Jinja2Templates
-        templates = Jinja2Templates(directory="app/api/admin/templates")
+
+        class CompatJinja2Templates(Jinja2Templates):
+            def TemplateResponse(self, *args, **kwargs):
+                # Starlette 1.x changed TemplateResponse to require request= first.
+                # Keep the existing FastAPI/Starlette 0.x call sites working.
+                if args and isinstance(args[0], str):
+                    name = args[0]
+                    context = args[1] if len(args) > 1 else kwargs.pop("context", {})
+                    request = kwargs.pop("request", None) or context.get("request")
+                    status_code = kwargs.pop("status_code", 200)
+                    return super().TemplateResponse(
+                        request=request,
+                        name=name,
+                        context=context,
+                        status_code=status_code,
+                        **kwargs,
+                    )
+                return super().TemplateResponse(*args, **kwargs)
+
+        templates = CompatJinja2Templates(directory="app/api/admin/templates")
     return templates
 
 
