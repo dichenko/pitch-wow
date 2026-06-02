@@ -1,6 +1,7 @@
 import re
 from typing import Any
 
+import structlog
 from langgraph.checkpoint.postgres import PostgresSaver
 from langgraph.graph import END, StateGraph
 
@@ -11,6 +12,7 @@ from app.services.anthropic_client import call_claude
 from app.services.langsmith import setup_langsmith
 
 setup_langsmith()
+logger = structlog.get_logger()
 
 NE_RE = re.compile(r"\b[Нн]е\s+", re.UNICODE)
 FORBIDDEN_PERSONAS_RE = re.compile(r"(Авиценн[а-я]*|Томирис|Мадин[а-я]*)", re.IGNORECASE)
@@ -84,8 +86,13 @@ async def classify_incoming(state: PitchWowState) -> PitchWowState:
         if result.get("investor_situation"):
             state["investor_situation"] = result["investor_situation"]
 
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(
+            "classifier_failed",
+            error_type=type(e).__name__,
+            error=str(e),
+            model=config.anthropic_classifier_model,
+        )
 
     return state
 
@@ -131,8 +138,8 @@ async def wings_interviewer_node(state: PitchWowState) -> PitchWowState:
             system_prompt_result = await load_active_prompt("babur.system")
             if system_prompt_result:
                 system_prompt = system_prompt_result[0]
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("system_prompt_load_failed", error_type=type(e).__name__, error=str(e))
 
     messages = state.get("messages", [])
 
@@ -174,7 +181,13 @@ async def wings_interviewer_node(state: PitchWowState) -> PitchWowState:
             "model": config.anthropic_primary_model,
             "prompt_version": state.get("_prompt_version", ""),
         }
-    except Exception:
+    except Exception as e:
+        logger.error(
+            "wings_interviewer_failed",
+            error_type=type(e).__name__,
+            error=str(e),
+            model=config.anthropic_primary_model,
+        )
         state["pending_response"] = "Извини, произошла ошибка. Давай попробуем ещё раз."
 
     return state
@@ -199,7 +212,13 @@ async def guardrails_subgraph(state: PitchWowState) -> PitchWowState:
                 )
                 draft = rewritten.strip()
                 retries += 1
-            except Exception:
+            except Exception as e:
+                logger.warning(
+                    "guardrail_rewrite_failed",
+                    rule="ne_particle",
+                    error_type=type(e).__name__,
+                    error=str(e),
+                )
                 incidents.append({"reason": "ne_particle", "original": draft[:200]})
 
     # Check 2-3: scope check
@@ -218,7 +237,13 @@ async def guardrails_subgraph(state: PitchWowState) -> PitchWowState:
                 )
                 draft = rewritten.strip()
                 retries += 1
-            except Exception:
+            except Exception as e:
+                logger.warning(
+                    "guardrail_rewrite_failed",
+                    rule="scope_violation",
+                    error_type=type(e).__name__,
+                    error=str(e),
+                )
                 incidents.append({"reason": "scope_violation", "original": draft[:200]})
 
     # Check 4: crisis safety
@@ -240,8 +265,13 @@ async def guardrails_subgraph(state: PitchWowState) -> PitchWowState:
                     safety = {}
                 if not safety.get("safe"):
                     incidents.append({"reason": "crisis_safety", "detail": safety})
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(
+                    "guardrail_check_failed",
+                    rule="crisis_safety",
+                    error_type=type(e).__name__,
+                    error=str(e),
+                )
 
     state["validated_response"] = draft
     state["guardrail_retries"] = retries
@@ -282,8 +312,8 @@ async def schedule_background_jobs(state: PitchWowState) -> PitchWowState:
                     payload={"user_msg_count": user_msg_count},
                 ))
                 await db.commit()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("background_job_schedule_failed", error_type=type(e).__name__, error=str(e))
 
     # Cross-sell handoff: if session completed and cross_sell_readiness == "ready"
     if (state.get("outcome") == "completed"
@@ -354,5 +384,6 @@ def compile_graph():
         checkpointer = PostgresSaver.from_conn_string(config.database_url)
         graph = builder.compile(checkpointer=checkpointer)
         return graph
-    except Exception:
+    except Exception as e:
+        logger.warning("postgres_checkpointer_unavailable", error_type=type(e).__name__, error=str(e))
         return builder.compile()
