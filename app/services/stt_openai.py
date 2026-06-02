@@ -18,7 +18,7 @@ def get_client() -> AsyncOpenAI:
     return _client
 
 
-async def transcribe_audio(file_path: str) -> tuple[str, float]:
+async def transcribe_audio(file_path: str) -> tuple[str, float | None]:
     """
     Transcribe audio using OpenAI gpt-4o-transcribe (Russian / English).
 
@@ -31,12 +31,11 @@ async def transcribe_audio(file_path: str) -> tuple[str, float]:
         response = await client.audio.transcriptions.create(
             model=config.openai_stt_model,
             file=f,
-            response_format="verbose_json",
+            response_format="json",
         )
 
     text = response.text or ""
-    # The API may return a confidence field; default to None so the caller
-    # can distinguish "unknown" from "low" and trigger the Muxlisa fallback.
+    # The API may return a confidence field; most OpenAI STT JSON responses do not.
     confidence = getattr(response, "confidence", None)
 
     logger.info(

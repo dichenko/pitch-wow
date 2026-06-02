@@ -136,13 +136,16 @@ async def _transcribe_voice(bot, file_id: str) -> tuple[str, str]:
         wav_path = await audio_svc.prepare_audio(raw_path)
 
         # 3. Primary: OpenAI (Russian / English)
-        text, confidence = await stt_openai.transcribe_audio(wav_path)
+        try:
+            text, confidence = await stt_openai.transcribe_audio(wav_path)
+        except Exception as e:
+            logger.error("stt_openai_failed", error_type=type(e).__name__, error=str(e))
+            text, confidence = "", None
 
         threshold = app_config.stt_fallback_confidence_threshold
         needs_fallback = (
             not text
-            or confidence is None
-            or confidence < threshold
+            or (confidence is not None and confidence < threshold)
         )
 
         # 4. Fallback: Muxlisa (Uzbek) — when OpenAI could not recognise the language
