@@ -19,5 +19,6 @@ RUN pip install --upgrade pip && pip install uv && uv sync --frozen --no-dev --n
 
 COPY app ./app
 COPY alembic.ini ./alembic.ini
+COPY seed.py ./seed.py
 
 CMD ["python", "-m", "app.bot.main"]
