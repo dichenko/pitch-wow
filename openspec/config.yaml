@@ -1,0 +1,276 @@
+# =============================================================================
+# OpenSpec Configuration — Pitch Wow
+# =============================================================================
+
+project:
+  name: "Pitch Wow"
+  description: >
+    AI-powered Telegram coaching bot for startup founders.
+    Helps founders "unpack" their product through structured conversation
+    with an AI agent (Babur), producing a natural features map and a
+    landing page prompt for claude.ai/design. Part of the soft-retail.ai
+    holding (Beruni, Navoi, Ulugbek, Amir).
+
+  mvp_goal: >
+    A working Telegram bot that conducts a coaching session with a founder,
+    classifies conversation phase (Defense / Crisis / Wings), applies
+    guardrails (no "ne" particle, scope check, crisis safety, compass drift),
+    generates a natural features map via Cartographer, assembles a landing
+    page TZ via Pitch Skeleton Assembler, and optionally cross-sells to the
+    next holding node. Admin panel for prompt and session management.
+
+# =============================================================================
+# Technology Stack
+# =============================================================================
+
+stack:
+  language: "Python 3.12"
+  bot_framework: "aiogram 3"
+  orchestration: "LangGraph (StateGraph + PostgresSaver checkpoints)"
+  api_framework: "FastAPI + Uvicorn"
+  database: "PostgreSQL 16 (asyncpg, SQLAlchemy 2.0 async, Alembic migrations)"
+  cache: "Redis 7"
+  llm: "Anthropic Claude (claude-sonnet-4-6 primary, claude-haiku-4-5 classifier)"
+  stt: "OpenAI gpt-4o-transcribe (ru/en, primary) + Muxlisa (uz, fallback) — ffmpeg conversion, confidence threshold fallback chain"
+  tts: "Yandex SpeechKit (voice: marina, format: oggopus)"
+  observability: "LangSmith tracing"
+  admin_ui: "Jinja2 server-side templates (FastAPI)"
+  auth: "itsdangerous signed tokens — admin gets a temp login link from the Telegram bot (/admin command), cookie-based session on ADMIN_BASE_URL"
+  containerization: "Docker (python:3.12-slim), docker-compose (dev + prod)"
+  ci_cd: "GitHub Actions (lint + mypy + pytest on PR/push to main)"
+  testing: "pytest + pytest-asyncio"
+  linting: "ruff + mypy (strict)"
+  reverse_proxy: "Caddy (docker/Caddyfile)"
+  package_manager: "uv"
+
+# =============================================================================
+# Application Architecture
+# =============================================================================
+
+architecture:
+  overview: >
+    Three separate processes sharing one codebase and database:
+    1. Bot process (aiogram) — receives Telegram messages, invokes LangGraph.
+    2. API process (FastAPI/Uvicorn) — admin panel, health checks.
+    3. Worker process — polls DB for background jobs (Cartographer, Assembler, Summarizer).
+
+  components:
+    - name: "Telegram Bot (app/bot/)"
+      role: >
+        Receives messages via polling or webhook (TELEGRAM_MODE env var).
+        Routes /start, /help, /reset, /voice_on, /voice_off, /status, /admin commands.
+        /admin generates a signed temp login link for the admin panel.
+        Handles voice messages: downloads → ffmpeg (16kHz mono WAV) → OpenAI STT
+        (ru/en) → if confidence below threshold → Muxlisa STT (uz) → feeds
+        transcribed text through the LangGraph pipeline.
+        For text messages, builds initial state and invokes the LangGraph graph.
+
+    - name: "LangGraph Core (app/graph/)"
+      role: >
+        Orchestrates the conversation flow as a directed graph:
+        normalize_turn → load_runtime_settings → classify_incoming →
+        update_calibration → [crisis_node | defense_node | wings_interviewer_node]
+        → guardrails_subgraph → persist_turn → schedule_background_jobs → END.
+        State persisted via LangGraph PostgresSaver checkpoints.
+
+    - name: "Admin Panel (app/api/admin/)"
+      role: >
+        FastAPI + Jinja2 templates. Pages: dashboard (stats), prompts list/detail
+        (versioning, activation), sessions list, settings list, guardrail
+        incidents list. Auth: admin sends /admin to Telegram bot, receives a
+        signed one-time link, clicks it to get a cookie-based session.
+
+    - name: "Background Worker (app/worker/)"
+      role: >
+        Polls the `jobs` table every 2 seconds. Processes cartographer,
+        assembler, and summarizer job types. Creates NaturalFeature and
+        Artifact records.
+
+    - name: "Database Layer (app/db/)"
+      role: >
+        SQLAlchemy 2.0 async models, asyncpg engine, Alembic migrations,
+        seed data (prompts, runtime settings) via init_db. Admin access
+        controlled by ADMIN_TG_IDS env var, no seed admin user.
+
+    - name: "External Services (app/services/)"
+      role: >
+        anthropic_client — Claude API wrapper.
+        stt_openai — OpenAI speech-to-text.
+        tts_yandex — Yandex SpeechKit text-to-speech.
+        langsmith — LangSmith tracing setup.
+        locks — distributed locks (Redis-based).
+
+# =============================================================================
+# Domain Model
+# =============================================================================
+
+domains:
+  - name: "Telegram Users (tg_users)"
+    description: "Telegram user profiles linked to sessions."
+
+  - name: "Sessions"
+    description: >
+      Core entity. Tracks phase (unknown/Defense/Crisis/Wings),
+      personality_dev_level (lichnost/biznes/sinergiya), current_stage,
+      investor_situation, cross_sell_readiness, next_node_hypothesis.
+      Linked to LangGraph thread_id for checkpoint persistence.
+
+  - name: "Messages"
+    description: >
+      Individual messages with full metadata: STT/TTS/LLM provider info,
+      token counts, latency, LangSmith trace IDs.
+
+  - name: "Prompts"
+    description: >
+      Versioned prompt registry. Keys: babur.system,
+      classifier.incoming_signals, classifier.question_class,
+      rewriter.no_ne_particle, guard.scope_check, guard.crisis_safety,
+      guard.compass_drift, cartographer.system, assembler.system,
+      summarizer.session, tts.voice_friendly. One active version per key.
+
+  - name: "Runtime Settings"
+    description: >
+      Key-value JSON settings adjustable at runtime
+      (llm.primary_model, stt.openai_model, tts.yandex_voice, etc.).
+
+  - name: "Guardrail Incidents"
+    description: >
+      Logged violations: ne_particle, scope_violation, crisis_safety,
+      compass_drift. Tracks retry count and resolution status.
+
+  - name: "Natural Features"
+    description: >
+      Cartographer output: founder's natural traits with confidence scores,
+      evidence quotes, axis (personality dimension), and assembler notes.
+
+  - name: "Artifacts"
+    description: >
+      Generated outputs: landing_tz_for_claude_design, investor_deck_tz.
+      Includes personality_dev_level and cross_sell context.
+
+  - name: "Jobs"
+    description: >
+      Background job queue. Types: cartographer, assembler, summarizer.
+      Status: pending → running → done/failed. Retry with max_attempts.
+
+  - name: "Admin Users"
+    description: "Admin panel authentication with role-based access."
+
+  - name: "Audit Log"
+    description: "Tracks admin actions with before/after state and IP."
+
+# =============================================================================
+# Implementation Status
+# =============================================================================
+
+implemented:
+  done:
+    - "Database models: all 10 tables (tg_users, sessions, messages, prompts, runtime_settings, guardrail_incidents, natural_features, artifacts, jobs, admin_users, audit_log)"
+    - "DB init and seed: prompts (11 keys), runtime settings (6) — via seed.py / init_db()"
+    - "LangGraph graph: full pipeline (normalize → classify → calibrate → route → interview → guardrails → persist → schedule)"
+    - "Phase classification: classifier LLM call + heuristic calibration (repeated questions, macro patterns)"
+    - "Guardrails subgraph: ne-particle rewrite, scope check rewrite, crisis safety check"
+    - "Cross-sell handoff logic in schedule_background_jobs"
+    - "Mirror-and-bid template for macro-pattern founders"
+    - "Bot handlers: /start, /help, /reset, /voice_on, /voice_off, /status, /admin (generates signed admin login link), text message handling"
+    - "Admin panel: temp-link auth (Telegram /admin → signed URL → cookie), dashboard, prompts list/detail/versioning/activation, sessions list, settings list, incidents list"
+    - "Background worker: job polling loop, cartographer/assembler/summarizer processors"
+    - "External service clients: Anthropic Claude, OpenAI STT (with OPENAI_BASE_URL), Muxlisa STT (Uzbek fallback), Yandex TTS"
+    - "Prompt registry with in-memory cache and invalidation"
+    - "Docker: Dockerfile, docker-compose (dev: postgres+redis), docker-compose.prod (bot+api+worker+postgres+redis)"
+    - "CI: GitHub Actions (ruff lint, mypy strict, pytest)"
+    - "Caddy reverse proxy config"
+    - "Health check endpoints: /health, /health/db, /health/redis, /health/langsmith"
+    - "Bot dual-mode support: polling (default) and webhook (TELEGRAM_MODE env var, aiohttp web server on port 8443, webhook registration/cleanup on startup/shutdown)"
+    - "Voice message STT: download → ffmpeg → OpenAI (ru/en, primary) → Muxlisa (uz, fallback when confidence < STT_FALLBACK_CONFIDENCE_THRESHOLD) → LangGraph pipeline"
+
+  not_done:
+    - "Voice reply sending: TTS client exists but no code sends OGG audio back to Telegram"
+    - "persist_turn node is a no-op — messages not saved to DB during graph execution"
+    - "schedule_background_jobs creates Job records but uses placeholder session_id (new UUID, not the real session UUID)"
+    - "Compass drift guardrail defined in seed but not called in guardrails_subgraph"
+    - "B1/B2 question class validation defined in seed but not enforced in the graph"
+    - "Session summarizer job processor exists but no code schedules summarizer jobs"
+    - "Assembler job processor exists but no code schedules assembler jobs (only cartographer is scheduled)"
+    - "telegram_responder.py is empty"
+    - "Alembic migrations env.py exists but no migration versions generated"
+    - "Admin panel: no prompt editing, only viewing and creating new versions"
+    - "Admin panel: no settings editing UI"
+    - "Admin panel: no session detail page with messages"
+    - "Admin panel: audit_log table exists but no logging middleware writes to it"
+    - "Redis locks service (app/services/locks.py) exists but not used anywhere"
+    - "Sentry DSN in .env but no Sentry SDK integration"
+    - "Session lifecycle: no logic to mark sessions as completed or handle timeout"
+    - "Deploy workflow (.github/workflows/deploy.yml) exists but not reviewed"
+
+# =============================================================================
+# Unknowns / Assumptions
+# =============================================================================
+
+unknowns:
+  - topic: "Session Lifecycle"
+    detail: >
+      No logic determines when a session is "completed". The Session model
+      has status, outcome, and completed_at fields, but nothing sets them
+      during normal conversation flow.
+
+  - topic: "Message Persistence"
+    detail: >
+      The persist_turn node is empty. Messages are not written to the
+      `messages` table during graph execution. Worker jobs that read
+      transcripts from the messages table will find no data.
+
+  - topic: "Cartographer/Assembler Scheduling"
+    detail: >
+      schedule_background_jobs creates a cartographer Job with a new
+      random UUID as session_id instead of the actual DB session UUID.
+      Assembler jobs are never scheduled. This means the artifact
+      pipeline is non-functional end-to-end.
+
+  - topic: "Prompt Cache Invalidation"
+    detail: >
+      Prompts are cached in-memory. When admin activates a new prompt
+      version, the cache is not invalidated in the bot process.
+      Bot will use stale prompts until restart.
+
+  - topic: "Caddy Configuration"
+    detail: >
+      docker/Caddyfile exists but its routing rules are not verified.
+      In webhook mode Caddy must proxy /telegram/webhook to the bot
+      process on TELEGRAM_WEBHOOK_PORT (default 8443); this routing
+      has not been added to the Caddyfile.
+
+  - topic: "Deploy Pipeline"
+    detail: >
+      .github/workflows/deploy.yml exists but deployment target
+      (VPS, registry, secrets) is not examined.
+
+# =============================================================================
+# OpenSpec Rules
+# =============================================================================
+
+openspec_rules:
+  - "Specs describe accepted, tested behavior of the system."
+  - "Changes describe new modifications or additions to the system."
+  - "Do not modify application code without a change proposal."
+  - "Requirements must be written as verifiable behavior (observable inputs/outputs)."
+  - "Scenarios must follow Given / When / Then format."
+  - "Each spec should map to one domain or bounded context."
+  - "Changes must reference the specs they modify or extend."
+
+# =============================================================================
+# Development Rules
+# =============================================================================
+
+dev_rules:
+  - "Do not break existing architecture without explicit justification documented in a change proposal."
+  - "Do not add new dependencies without necessity — justify in the change proposal."
+  - "All changes must account for Docker, PostgreSQL, and CI/CD pipeline."
+  - "Changes must be small and verifiable — one logical unit per change."
+  - "Python 3.12+, use type hints everywhere, mypy strict compliance."
+  - "Linting: ruff (line-length 120). Run `uv run ruff check app tests` before commit."
+  - "Tests: pytest + pytest-asyncio. Run `uv run pytest -q` before commit."
+  - "Database changes require Alembic migration, not manual DDL."
+  - "Prompts are data, not code — manage via seed.py or admin panel, never hardcode in graph nodes."
+  - "All async DB operations use async_session_factory from app.db.session."
+  - "LangGraph state changes must go through the graph, not direct state mutation outside nodes."

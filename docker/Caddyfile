@@ -1,0 +1,15 @@
+pitchwow.example.com {
+    # In webhook mode: proxy Telegram webhook POSTs to the bot process
+    handle /telegram/webhook {
+        reverse_proxy bot:8443
+    }
+
+    # Everything else (health checks, admin API if exposed)
+    handle {
+        reverse_proxy api:8000
+    }
+}
+
+admin.pitchwow.example.com {
+    reverse_proxy api:8000
+}

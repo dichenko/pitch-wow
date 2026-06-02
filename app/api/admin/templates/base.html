@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pitch Wow Admin</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+        .json-view { white-space: pre-wrap; font-family: 'Courier New', monospace; font-size: 13px; }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <nav class="bg-indigo-700 text-white px-6 py-3 flex items-center justify-between">
+        <div class="flex items-center gap-6">
+            <a href="/admin/dashboard" class="font-bold text-lg">Pitch Wow Admin</a>
+            <a href="/admin/dashboard" class="text-sm hover:underline">Dashboard</a>
+            <a href="/admin/sessions" class="text-sm hover:underline">Sessions</a>
+            <a href="/admin/prompts" class="text-sm hover:underline">Prompts</a>
+            <a href="/admin/settings" class="text-sm hover:underline">Settings</a>
+            <a href="/admin/incidents" class="text-sm hover:underline">Incidents</a>
+        </div>
+        <div class="flex items-center gap-4">
+            <span class="text-sm">tg:{{ admin.telegram_user_id }} ({{ admin.role }})</span>
+            <a href="/admin/logout" class="text-sm hover:underline">Logout</a>
+        </div>
+    </nav>
+    <main class="max-w-7xl mx-auto px-6 py-6">
+        {% block content %}{% endblock %}
+    </main>
+</body>
+</html>

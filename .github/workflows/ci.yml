@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: pitchwow_test
+          POSTGRES_USER: pitchwow
+          POSTGRES_PASSWORD: pitchwow
+        ports:
+          - 5432:5432
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install deps
+        run: |
+          pip install uv
+          uv sync --frozen --extra dev
+      - name: Lint
+        run: |
+          uv run ruff check app tests
+      - name: Tests
+        env:
+          DATABASE_URL: postgresql+psycopg://pitchwow:pitchwow@localhost:5432/pitchwow_test
+          REDIS_URL: redis://localhost:6379/0
+        run: uv run pytest -q

@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="text-2xl font-bold mb-6">Dashboard</h1>
+
+<div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+    <div class="bg-white rounded-lg shadow p-4">
+        <div class="text-sm text-gray-500">Активных сессий</div>
+        <div class="text-3xl font-bold text-indigo-600">{{ stats.active_sessions }}</div>
+    </div>
+    <div class="bg-white rounded-lg shadow p-4">
+        <div class="text-sm text-gray-500">Завершено</div>
+        <div class="text-3xl font-bold text-green-600">{{ stats.completed_sessions }}</div>
+    </div>
+    <div class="bg-white rounded-lg shadow p-4">
+        <div class="text-sm text-gray-500">Короткие сессии</div>
+        <div class="text-3xl font-bold text-yellow-600">{{ stats.short_sessions }}</div>
+    </div>
+    <div class="bg-white rounded-lg shadow p-4">
+        <div class="text-sm text-gray-500">Кризисные выходы</div>
+        <div class="text-3xl font-bold text-red-600">{{ stats.crisis_walk_aways }}</div>
+    </div>
+</div>
+
+<div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+    <div class="bg-white rounded-lg shadow p-4">
+        <h2 class="font-semibold mb-3">Распределение по фазам</h2>
+        <div class="space-y-2">
+            {% for phase, count in stats.phases.items() %}
+            <div class="flex justify-between text-sm">
+                <span>{{ phase }}</span>
+                <span class="font-medium">{{ count }}</span>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    <div class="bg-white rounded-lg shadow p-4">
+        <h2 class="font-semibold mb-3">Уровень развития Личности</h2>
+        <div class="space-y-2">
+            {% for level, count in stats.personality_levels.items() %}
+            <div class="flex justify-between text-sm">
+                <span>{{ level }}</span>
+                <span class="font-medium">{{ count }}</span>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+{% endblock %}

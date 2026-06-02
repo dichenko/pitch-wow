@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="text-2xl font-bold mb-4">Guardrail Incidents</h1>
+
+<div class="bg-white rounded-lg shadow overflow-hidden">
+    <table class="w-full text-sm">
+        <thead class="bg-gray-100">
+            <tr>
+                <th class="px-4 py-2 text-left">Reason</th>
+                <th class="px-4 py-2 text-left">Session</th>
+                <th class="px-4 py-2 text-left">Retries</th>
+                <th class="px-4 py-2 text-left">Resolved</th>
+                <th class="px-4 py-2 text-left">Created</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for inc in incidents %}
+            <tr class="border-t hover:bg-gray-50">
+                <td class="px-4 py-2">
+                    <span class="px-2 py-0.5 rounded text-xs bg-red-100 text-red-700">{{ inc.reason }}</span>
+                </td>
+                <td class="px-4 py-2 font-mono text-xs">{{ inc.session_id }}</td>
+                <td class="px-4 py-2">{{ inc.retry_count }}</td>
+                <td class="px-4 py-2">
+                    {% if inc.resolved %}
+                    <span class="text-green-600">yes</span>
+                    {% else %}
+                    <span class="text-yellow-600">no</span>
+                    {% endif %}
+                </td>
+                <td class="px-4 py-2 text-xs text-gray-500">{{ inc.created_at }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}
